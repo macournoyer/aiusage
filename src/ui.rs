@@ -19,32 +19,46 @@ fn pct_color(pct: u8) -> Color {
     }
 }
 
-fn gauge_label(pct: u8, reset: &str) -> String {
-    if reset.is_empty() {
-        format!("{pct}%")
-    } else {
-        format!("{pct}%  resets {reset}")
-    }
-}
-
 fn draw_gauge(f: &mut Frame, area: Rect, label: &str, pct: u8, reset: &str) {
     let color = pct_color(pct);
+
+    // name | bar (fixed 24 cols) | pct | reset
+    let reset_text = if reset.is_empty() {
+        String::new()
+    } else {
+        format!("resets {reset}")
+    };
+    let pct_text = format!("{pct:>3}%");
+
+    let cols = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Length(10),  // row label
+            Constraint::Length(24),  // bar
+            Constraint::Length(6),   // "  XX%"
+            Constraint::Min(0),      // reset time
+        ])
+        .split(area);
+
     let gauge = Gauge::default()
         .block(Block::default())
         .gauge_style(Style::default().fg(color).bg(Color::DarkGray))
         .percent(pct as u16)
-        .label(gauge_label(pct, reset));
+        .label("");
 
-    // Label on the left, gauge filling rest
-    let cols = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Length(10), Constraint::Min(0)])
-        .split(area);
-
-    let lbl = Paragraph::new(label)
-        .style(Style::default().fg(Color::Gray));
-    f.render_widget(lbl, cols[0]);
+    f.render_widget(
+        Paragraph::new(label).style(Style::default().fg(Color::Gray)),
+        cols[0],
+    );
     f.render_widget(gauge, cols[1]);
+    f.render_widget(
+        Paragraph::new(format!("  {pct_text}")).style(Style::default().fg(color)),
+        cols[2],
+    );
+    f.render_widget(
+        Paragraph::new(format!("  {reset_text}")).style(Style::default().fg(Color::DarkGray)),
+        cols[3],
+    );
 }
 
 fn claude_lines(usage: &ClaudeUsage) -> Vec<(&'static str, u8, String)> {
@@ -56,10 +70,7 @@ fn claude_lines(usage: &ClaudeUsage) -> Vec<(&'static str, u8, String)> {
         rows.push(("7-day    ", w.used_percent, w.reset_label.clone()));
     }
     if let Some(e) = &usage.extra {
-        let label = format!(
-            "{}%  ${:.0} / ${:.0} {}",
-            e.used_percent, e.used_credits, e.monthly_limit, e.currency
-        );
+        let label = format!("${:.0} / ${:.0} {}", e.used_credits, e.monthly_limit, e.currency);
         rows.push(("credits  ", e.used_percent, label));
     }
     rows
