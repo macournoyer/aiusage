@@ -4,7 +4,7 @@ use tokio::sync::watch;
 
 use crate::fetch::{fetch_all, UsageData};
 
-pub const REFRESH_SECS: u64 = 60;
+pub const REFRESH_SECS: u64 = 300;
 
 pub struct App {
     pub data: UsageData,
@@ -32,7 +32,13 @@ impl App {
         // Drain any completed fetch result
         if self.rx.has_changed().unwrap_or(false) {
             if let Some((data, ts)) = self.rx.borrow_and_update().clone() {
-                self.data = data;
+                // Keep stale data when a fetch fails so display doesn't blank out
+                self.data = UsageData {
+                    claude: data.claude.or_else(|| self.data.claude.clone()),
+                    claude_error: data.claude_error,
+                    codex: data.codex.or_else(|| self.data.codex.clone()),
+                    codex_error: data.codex_error,
+                };
                 self.last_updated = Some(ts);
                 self.fetching = false;
                 self.next_refresh = Instant::now() + Duration::from_secs(REFRESH_SECS);

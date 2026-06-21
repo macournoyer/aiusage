@@ -55,16 +55,24 @@ pub struct UsageData {
 }
 
 fn format_reset(ts: &Value) -> String {
+    let fmt_local = |local: chrono::DateTime<Local>| {
+        let today = Local::now().date_naive();
+        if local.date_naive() == today {
+            local.format("%-I:%M %p").to_string()
+        } else {
+            local.format("%a %-I:%M %p").to_string()
+        }
+    };
     // Try unix timestamp (integer or float)
     if let Some(secs) = ts.as_f64() {
         if let Some(dt) = DateTime::from_timestamp(secs as i64, 0) {
-            return dt.with_timezone(&Local).format("%-I:%M %p").to_string();
+            return fmt_local(dt.with_timezone(&Local));
         }
     }
     // Try ISO string
     if let Some(s) = ts.as_str() {
         if let Ok(dt) = DateTime::parse_from_rfc3339(s) {
-            return dt.with_timezone(&Local).format("%-I:%M %p").to_string();
+            return fmt_local(dt.with_timezone(&Local));
         }
     }
     String::new()
@@ -168,9 +176,11 @@ pub async fn fetch_claude(client: &reqwest::Client) -> Result<ClaudeUsage> {
         .header("anthropic-beta", "oauth-2025-04-20")
         .send()
         .await
-        .context("Claude usage request")?
-        .error_for_status()
-        .context("Claude usage HTTP error")?;
+        .context("Claude usage request")?;
+    if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
+        return Err(anyhow!("rate limited"));
+    }
+    let resp = resp.error_for_status().context("Claude usage HTTP error")?;
     let data: Value = resp.json().await.context("Claude usage response")?;
 
     let five_hour = data
@@ -182,8 +192,8 @@ pub async fn fetch_claude(client: &reqwest::Client) -> Result<ClaudeUsage> {
 
     let extra = data.get("extra_usage").and_then(|e| {
         if e.get("is_enabled")?.as_bool()? {
-            let used = e.get("used_credits")?.as_f64()?;
-            let limit = e.get("monthly_limit")?.as_f64()?;
+            let used = e.get("used_credits")?.as_f64()? / 100.0;
+            let limit = e.get("monthly_limit")?.as_f64()? / 100.0;
             let pct = if limit > 0.0 {
                 (used / limit * 100.0).round().clamp(0.0, 100.0) as u8
             } else {
